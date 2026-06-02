@@ -22,26 +22,17 @@ from PIL import Image
 
 
 def set_seed(seed):
-    # for hash
     os.environ['PYTHONHASHSEED'] = str(seed)
-    # for python and numpy
     random.seed(seed)
     np.random.seed(seed)
-    # for cpu gpu
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    # for cudnn
     cudnn.benchmark = False
     cudnn.deterministic = True
 
 
 def get_logger(name, log_dir):
-    '''
-    Args:
-        name(str): name of logger
-        log_dir(str): path of log
-    '''
 
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
@@ -158,7 +149,7 @@ def get_optimizer(config, model):
             dampening=config.dampening,
             nesterov=config.nesterov
         )
-    else:  # default opt is SGD
+    else:
         return torch.optim.SGD(
             model.parameters(),
             lr=0.01,
@@ -263,11 +254,7 @@ def save_imgs(img, msk, msk_pred, i, save_path, datasets, threshold=0.5, test_da
 class BCELoss(nn.Module):
     def __init__(self):
         super(BCELoss, self).__init__()
-        ######################
-        #为了适配我原本的visionmamba与transunet双分支的AMP混合精度训练
         self.bceloss = nn.BCELoss()
-        #self.bceloss = nn.BCEWithLogitsLoss()
-        ####################################
     def forward(self, pred, target):
         size = pred.size(0)
         pred_ = pred.view(size, -1)
@@ -275,36 +262,19 @@ class BCELoss(nn.Module):
 
         return self.bceloss(pred_, target_)
 
-
-# Dice 和 bce loss 的选择，根据是什么，如果分割小病灶，是否需要调参？
-# https://blog.csdn.net/longshaonihaoa/article/details/111824916
 class DiceLoss(nn.Module):
     def __init__(self):
         super(DiceLoss, self).__init__()
 
     def forward(self, pred, target):
-        ######
-        #smooth = 1
         smooth = 1e-5
-        ####
         size = pred.size(0)
-        ###################################33
         pred_ = pred.view(size, -1)
         target_ = target.view(size, -1)
         intersection = pred_ * target_
         dice_score = (2 * intersection.sum(1) + smooth) / (pred_.sum(1) + target_.sum(1) + smooth)
-        # prob = torch.sigmoid(pred)  # ⭐只在 Dice 内
-        # prob_ = prob.view(size, -1)
-        # target_ = target.view(size, -1)
-        #
-        # intersection = prob_ * target_
-        # dice_score = (2 * intersection.sum(1) + smooth) / (prob_.sum(1) + target_.sum(1) + smooth)
-        ####################################33
-
         dice_loss = 1 - dice_score.sum() / size
-
         return dice_loss
-
 
 class nDiceLoss(nn.Module):
     def __init__(self, n_classes):
@@ -314,7 +284,7 @@ class nDiceLoss(nn.Module):
     def _one_hot_encoder(self, input_tensor):
         tensor_list = []
         for i in range(self.n_classes):
-            temp_prob = input_tensor == i  # * torch.ones_like(input_tensor)
+            temp_prob = input_tensor == i
             tensor_list.append(temp_prob.unsqueeze(1))
         output_tensor = torch.cat(tensor_list, dim=1)
         return output_tensor.float()
@@ -361,9 +331,9 @@ class CeDiceLoss(nn.Module):
 
 
 class BceDiceLoss(nn.Module):
-    ############################
-    def __init__(self, wb=1, wd=1):#原本wb=1, wd=1,6号运行时设置wd=0慢慢增加至最大1
-    ###############################
+
+    def __init__(self, wb=1, wd=1):
+
         super(BceDiceLoss, self).__init__()
         self.bce = BCELoss()
         self.dice = DiceLoss()
@@ -376,16 +346,13 @@ class BceDiceLoss(nn.Module):
 
         loss = self.wd * diceloss + self.wb * bceloss
         return loss
-################33
+
 class IoULoss(nn.Module):
     def __init__(self):
         super(IoULoss, self).__init__()
 
     def forward(self, pred, target):
         smooth = 1
-
-        #pred = torch.sigmoid(pred)   # logits → probability
-
         pred = pred.view(pred.size(0), -1)
         target = target.view(target.size(0), -1)
 
@@ -411,7 +378,6 @@ class SegLoss(nn.Module):
         loss_iou = self.iou(pred, target)
 
         return loss_bce + loss_dice + loss_iou
-##################333
 
 class GT_BceDiceLoss(nn.Module):
     def __init__(self, wb=1, wd=1):
@@ -443,7 +409,6 @@ class myResize:
 
     def __call__(self, data):
         image, mask = data
-        #return TF.resize(image, [self.size_h, self.size_w]), TF.resize(mask, [self.size_h, self.size_w])
         img_resized = cv2.resize(image, (self.size_w, self.size_h), interpolation=cv2.INTER_LINEAR)
         mask_resized = cv2.resize(mask, (self.size_w, self.size_h), interpolation=cv2.INTER_NEAREST)
         return img_resized, mask_resized
@@ -455,7 +420,6 @@ class myRandomHorizontalFlip:
     def __call__(self, data):
         image, mask = data
         if random.random() < self.p:
-            #return TF.hflip(image), TF.hflip(mask)
             return np.fliplr(image).copy(), np.fliplr(mask).copy()
         else:
             return image, mask
@@ -468,23 +432,9 @@ class myRandomVerticalFlip:
     def __call__(self, data):
         image, mask = data
         if random.random() < self.p:
-            #return TF.vflip(image), TF.vflip(mask)
             return np.flipud(image).copy(), np.flipud(mask).copy()
         else:
             return image, mask
-
-#######################################3
-# class myRandomRotation:
-#     def __init__(self, p=0.5, degree=[0, 360]):
-#         self.angle = random.uniform(degree[0], degree[1])
-#         self.p = p
-#
-#     def __call__(self, data):
-#         image, mask = data
-#         if random.random() < self.p:
-#             return TF.rotate(image, self.angle), TF.rotate(mask, self.angle)
-#         else:
-#             return image, mask
 
 class myRandomRotation:
     def __init__(self, p=0.5, degree=[0, 360]):
@@ -503,7 +453,6 @@ class myRandomRotation:
         return image, mask
 
 
-# --------------------------- 高级增强 ---------------------------
 class myRandomResizedCrop:
     def __init__(self, p=0.5, size=(224,224), scale=(0.8,1.0), ratio=(0.75,1.33)):
         self.p = p
@@ -618,7 +567,7 @@ class myGaussianBlur:
             img = cv2.GaussianBlur(img,(ksize,ksize),0)
         return img, mask
 
-#随机遮挡图像区域（类似 DropBlock），强制模型学习上下文
+
 class myCutout:
     def __init__(self, p=0.5, num_holes=1, max_h_size=32, max_w_size=32):
         self.p = p
@@ -670,7 +619,7 @@ class myRandomErasing:
                 image[x1:x1+h_erase, y1:y1+w_erase, :] = 0
 
         return image, mask
-#########################################3
+
 class myNormalize:
     def __init__(self, data_name, train=True):
         if data_name == 'isic18':
@@ -716,8 +665,7 @@ class myNormalize:
                 self.mean = 156.2899
                 self.std = 26.5457
 
-    # TODO 注意 息肉数据集合肠化数据集的区别
-    # 只是对image 做了归一化和标准化，后来还 TM * 255 窒息
+
     def __call__(self, data):
         img, msk = data
         img_normalized = (img - self.mean) / self.std
@@ -725,18 +673,7 @@ class myNormalize:
                           / (np.max(img_normalized) - np.min(img_normalized))) * 255.
         return img_normalized, msk
 
-from thop import profile  ## 导入thop模块
-
-
-# def cal_params_flops(model, size, logger):
-#     input = torch.randn(1, 3, size, size).cuda()
-#     flops, params = profile(model, inputs=(input,))
-#     print('flops', flops / 1e9)  ## 打印计算量
-#     print('params', params / 1e6)  ## 打印参数量
-#
-#     total = sum(p.numel() for p in model.parameters())
-#     print("Total params: %.2fM" % (total / 1e6))
-#     logger.info(f'flops: {flops / 1e9}, params: {params / 1e6}, Total params: : {total / 1e6:.4f}')
+from thop import profile
 import time
 from typing import Any, Dict, Optional, Tuple
 
@@ -937,5 +874,4 @@ def test_single_volume(image, label, net, classes, patch_size=[256, 256],
         sitk.WriteImage(prd_itk, test_save_path + '/' + case + "_pred.nii.gz")
         sitk.WriteImage(img_itk, test_save_path + '/' + case + "_img.nii.gz")
         sitk.WriteImage(lab_itk, test_save_path + '/' + case + "_gt.nii.gz")
-        # cv2.imwrite(test_save_path + '/'+case + '.png', prediction*255)
     return metric_list

@@ -1,31 +1,14 @@
 from torchvision import transforms
-#from fusion.utils_polyp import *
 from fusion.utils_polyp_loss_5 import *
 from datetime import datetime
 
 class setting_config:
-    """
-    the config of training setting.
-    """
 
-    network = 'fusion_egalayerall'#vmunet-v2 mamba_noegalosscsca_adaptive  dropega_adaptive  merged1_adaptive
+    network = 'fusion_egalayerall'
     model_config = {
         'num_classes': 1,
         'input_channels': 3,
-        # # ----- VM-UNet-V2 -----2 9 27  small #
-        # 'depths': [1,3,8,4],# t:1,3,8,4 s:3,3,7,5#2,2,9,2
-        # ###############################
-        # 'num_heads': [2, 4, 8, 16],
-        # 'window_size' : [8, 8, 14, 7],
-        # 'dim' : 80,
-        # 'in_dim' : 32,
-        # 'mlp_ratio' : 4,
-        # 'resolution' : 224,
-        # #'depths_decoder': [2,2,2,1],
-        # ########################
-        # 'drop_path_rate': 0.2,
-        # 'load_ckpt_path': '../model/mambavision_tiny_1k.pth.tar',#./pre_trained_weights/vmamba_small_e238_ema.pth
-        # # 'deep_supervision': True,
+
     }
 
     datasets = 'polyp'
@@ -42,26 +25,21 @@ class setting_config:
     else:
         raise Exception('datasets in not right!')
 
-
-    #criterion = BceDiceLoss(wb=1, wd=1)
-    #criterion = SegLoss()
     criterion = SegLoss(lambda_dice=1.0, lambda_iou=1.0)#1.0  0.5, 1.0, 1.5, 2.0
-
-    # pretrained_path = './pre_trained/'
     transunet_pretrained_path = "../model/vit_checkpoint/imagenet21k/R50+ViT-B_16.npz"
     num_classes = 1
-    input_size_h = 256#256
-    input_size_w = 256#256
+    input_size_h = 256
+    input_size_w = 256
     input_channels = 3
     distributed = False
     local_rank = -1
-    num_workers = 0#8
+    num_workers = 0
     seed = 42
     world_size = None
     rank = None
     amp = False
     gpu_id = '0'
-    batch_size = 16##24 80  zhiqinagaide16
+    batch_size = 16
     epochs = 200
 
     work_dir = 'results/' + network + '_' + datasets + '_' + datetime.now().strftime('%A_%d_%B_%Y_%Hh_%Mm_%Ss') + '/'
@@ -71,57 +49,27 @@ class setting_config:
     save_interval = 10
     threshold = 0.5
 
-    # train_transformer = transforms.Compose([
-    #     myNormalize(datasets, train=True), #
-    #     myToTensor(),
-    #     myRandomHorizontalFlip(p=0.5),
-    #     myRandomVerticalFlip(p=0.5),
-    #     myRandomRotation(p=0.5, degree=[0, 360]),
-    #     myResize(input_size_h, input_size_w)
-    # ])
-    # test_transformer = transforms.Compose([
-    #     myNormalize(datasets, train=False),
-    #     myToTensor(),
-    #     myResize(input_size_h, input_size_w)
-    # ])
+
     train_transformer = transforms.Compose([
-        ##############################
-        # myNormalize(datasets, train=True), #
-        # myToTensor(),
-        # myRandomHorizontalFlip(p=0.5),
-        # myRandomVerticalFlip(p=0.5),
-        # myRandomRotation(p=0.5, degree=[0, 360]),
-        # myResize(input_size_h, input_size_w)
-
-        # --- 随机裁剪（mask同步） ---
         myRandomResizedCrop(p=0.5, size=(input_size_h, input_size_w), scale=(0.8, 1.0), ratio=(0.9, 1.1)),
-
-        # --- 几何增强（mask 同步） ---
         myRandomHorizontalFlip(p=0.5),
         myRandomVerticalFlip(p=0.5),
         myRandomRotation(p=0.5, degree=[0, 360]),
         myRandomAffine(p=0.3, degrees=15, translate=0.1, scale=0.1, shear=10),
 
-        # --- 高级像素级增强（仅对图像，不改变 mask） ---
         myColorJitter(p=0.3),
         myRandomGamma(p=0.3, gamma_range=[0.7, 1.5]),
         myGaussianNoise(p=0.3),
         myCutout(p=0.2, num_holes=1, max_h_size=32, max_w_size=32),
         myRandomErasing(p=0.2, scale=(0.02, 0.1), ratio=(0.3, 3.3)),
-
-        # 保证最终尺寸
         myResize(input_size_h, input_size_w),
         myNormalize(datasets, train=True)
-        # myToTensor()
-        #####################
+
     ])
     test_transformer = transforms.Compose([
-        # myNormalize(datasets, train=False),
-        # myToTensor(),
-        # myResize(input_size_h, input_size_w)
         myResize(input_size_h, input_size_w),
         myNormalize(datasets, train=False),
-        # myToTensor()
+
     ])
 
     opt = 'AdamW'

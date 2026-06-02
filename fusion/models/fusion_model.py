@@ -585,17 +585,6 @@ def build_fusion_model(
 
     transunet_part = VisionTransformer(config_vit, img_size=img_size, num_classes=num_classes)
 
-    if load_pretrained:
-        if npz_path and os.path.exists(npz_path):
-            print(f"Loading TransUNet weights from: {npz_path}")
-            weights = np.load(npz_path)
-            transunet_part.load_from(weights=weights)
-            print("TransUNet weights loaded successfully.")
-        else:
-            print(f"Warning: TransUNet pretrained weights not found at '{npz_path}'.")
-    else:
-        print("[build_fusion_model] Skipping pretrained weights.")
-
     visionmamba_part = VisionMamba(
         img_size=img_size,
         patch_size=16,
@@ -614,58 +603,10 @@ def build_fusion_model(
         transunet_part,
         visionmamba_part,
         num_classes=num_classes,
-        use_ega_layers=(2,3),#(2, 3),,(3,),(0,1,2,3)
+        use_ega_layers=(2,3),
         ega_input_mode=ega_input_mode,
         use_cross_guided_fusion=use_cross_guided_fusion,
         use_two_stage_decoder=use_two_stage_decoder,
         use_ega_refine=use_ega_refine
     )
-
     return final_model
-
-
-# if __name__ == "__main__":
-#     model = build_fusion_model(
-#         load_pretrained=False,
-#         ega_input_mode="adaptive",
-#         use_cross_guided_fusion=True,
-#         use_two_stage_decoder=True,
-#         use_ega_refine=True
-#     )
-#     model.eval()
-#
-#     x = torch.randn(2, 3, setting_config.input_size_h, setting_config.input_size_h).cuda()
-#     model = model.cuda()
-#
-#     with torch.no_grad():
-#         y = model(x, validate_ega=True)
-#
-#     print("output shape:", y.shape)
-#     print("model.last_debug_info =", model.last_debug_info)
-if __name__ == "__main__":
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    model = build_fusion_model(
-        load_pretrained=False,
-        ega_input_mode="pred",
-        use_cross_guided_fusion=True,
-        use_two_stage_decoder=True,
-        use_ega_refine=True
-    ).to(device)
-
-    model.eval()
-
-    x = torch.randn(
-        2,
-        3,
-        setting_config.input_size_h,
-        setting_config.input_size_h
-    ).to(device)
-
-    with torch.no_grad():
-        y = model(x, validate_ega=False)
-
-    print("output shape:", y.shape)
-
-    if hasattr(model, "last_debug_info"):
-        print("model.last_debug_info:", model.last_debug_info)

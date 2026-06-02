@@ -9,7 +9,6 @@ import torch.nn.functional as F
 
 
 def np2th(weights, conv=False):
-    """Possibly convert HWIO to OIHW."""
     if conv:
         weights = weights.transpose([3, 2, 0, 1])
     return torch.from_numpy(weights)
@@ -21,19 +20,14 @@ import torch.nn as nn
 
 class StdConv2d(nn.Conv2d):
     def forward(self, x):
-        # 原始标准化权重
         w = self.weight
         v, m = torch.var_mean(w, dim=[1, 2, 3], keepdim=True, unbiased=False)
         w = (w - m) / torch.sqrt(v + 1e-5)
-
-        # ---- 保证 weight / bias 在相同 device & dtype（仅临时 cast） ----
-        # 这行确保无论 x 是 float/half/cpu/cuda，权重都临时转换到相同 dtype/device
         if w.dtype != x.dtype or w.device != x.device:
             w = w.to(device=x.device, dtype=x.dtype)
         bias = self.bias
         if bias is not None and (bias.dtype != x.dtype or bias.device != x.device):
             bias = bias.to(device=x.device, dtype=x.dtype)
-        # ----------------------------------------------------------------
 
         return F.conv2d(
             x, w, bias,
@@ -54,8 +48,6 @@ def conv1x1(cin, cout, stride=1, bias=False):
 
 
 class PreActBottleneck(nn.Module):
-    """Pre-activation (v2) bottleneck block.
-    """
 
     def __init__(self, cin, cout=None, cmid=None, stride=1):
         super().__init__()
@@ -65,25 +57,22 @@ class PreActBottleneck(nn.Module):
         self.gn1 = nn.GroupNorm(32, cmid, eps=1e-6)
         self.conv1 = conv1x1(cin, cmid, bias=False)
         self.gn2 = nn.GroupNorm(32, cmid, eps=1e-6)
-        self.conv2 = conv3x3(cmid, cmid, stride, bias=False)  # Original code has it on conv1!!
+        self.conv2 = conv3x3(cmid, cmid, stride, bias=False)
         self.gn3 = nn.GroupNorm(32, cout, eps=1e-6)
         self.conv3 = conv1x1(cmid, cout, bias=False)
         self.relu = nn.ReLU(inplace=True)
 
         if (stride != 1 or cin != cout):
-            # Projection also with pre-activation according to paper.
             self.downsample = conv1x1(cin, cout, stride, bias=False)
             self.gn_proj = nn.GroupNorm(cout, cout)
 
     def forward(self, x):
 
-        # Residual branch
         residual = x
         if hasattr(self, 'downsample'):
             residual = self.downsample(x)
             residual = self.gn_proj(residual)
 
-        # Unit's branch
         y = self.relu(self.gn1(self.conv1(x)))
         y = self.relu(self.gn2(self.conv2(y)))
         y = self.gn3(self.conv3(y))
@@ -128,7 +117,6 @@ class PreActBottleneck(nn.Module):
             self.gn_proj.bias.copy_(proj_gn_bias.view(-1))
 
 class ResNetV2(nn.Module):
-    """Implementation of Pre-activation (v2) ResNet mode."""
 
     def __init__(self, block_units, width_factor):
         super().__init__()
@@ -139,7 +127,7 @@ class ResNetV2(nn.Module):
             ('conv', StdConv2d(3, width, kernel_size=7, stride=2, bias=False, padding=3)),
             ('gn', nn.GroupNorm(32, width, eps=1e-6)),
             ('relu', nn.ReLU(inplace=True)),
-            # ('pool', nn.MaxPool2d(kernel_size=3, stride=2, padding=0))
+
         ]))
 
         self.body = nn.Sequential(OrderedDict([
@@ -157,20 +145,16 @@ class ResNetV2(nn.Module):
                 ))),
         ]))
 
-        # ------------------ Ensure GroupNorm params are on module device ------------------
-        # Move/replace GroupNorm weight/bias to module device to avoid CPU/GPU mismatch under DDP/AMP.
         try:
             device = next(self.parameters()).device
         except StopIteration:
             device = torch.device('cpu')
         for m in self.modules():
             if isinstance(m, nn.GroupNorm):
-                # replace weight/bias with Parameters on the same device
                 if getattr(m, 'weight', None) is not None:
                     m.weight = nn.Parameter(m.weight.to(device))
                 if getattr(m, 'bias', None) is not None:
                     m.bias = nn.Parameter(m.bias.to(device))
-        # -------------------------------------------------------------------------------
     def forward(self, x):
         features = []
         b, c, in_size, _ = x.size()

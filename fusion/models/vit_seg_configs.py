@@ -1,7 +1,6 @@
 import ml_collections
 
 def get_b16_config():
-    """Returns the ViT-B/16 configuration."""
     config = ml_collections.ConfigDict()
     config.patches = ml_collections.ConfigDict({'size': (16, 16)})
     config.hidden_size = 768
@@ -25,7 +24,6 @@ def get_b16_config():
 
 
 def get_testing():
-    """Returns a minimal configuration for testing."""
     config = ml_collections.ConfigDict()
     config.patches = ml_collections.ConfigDict({'size': (16, 16)})
     config.hidden_size = 1
@@ -40,7 +38,6 @@ def get_testing():
     return config
 
 def get_r50_b16_config():
-    """Returns the Resnet50 + ViT-B/16 configuration."""
     config = get_b16_config()
     config.patches.grid = (14, 14)
     config.resnet = ml_collections.ConfigDict()
@@ -67,7 +64,6 @@ def get_b32_config():
 
 
 def get_l16_config():
-    """Returns the ViT-L/16 configuration."""
     config = ml_collections.ConfigDict()
     config.patches = ml_collections.ConfigDict({'size': (16, 16)})
     config.hidden_size = 1024
@@ -90,7 +86,6 @@ def get_l16_config():
 
 
 def get_r50_l16_config():
-    """Returns the Resnet50 + ViT-L/16 configuration. customized """
     config = get_l16_config()
     config.patches.grid = (16, 16)
     config.resnet = ml_collections.ConfigDict()
@@ -98,7 +93,6 @@ def get_r50_l16_config():
     config.resnet.width_factor = 1
 
     config.classifier = 'seg'
-    #config.resnet_pretrained_path = './model/vit_checkpoint/imagenet21k/R50+ViT-B_16.npz'
     config.resnet_pretrained_path = './model/vit_checkpoint/imagenet21k/R50+ViT-L_16.npz'
     config.decoder_channels = (256, 128, 64, 16)
     config.skip_channels = [512, 256, 64, 16]
@@ -108,14 +102,12 @@ def get_r50_l16_config():
 
 
 def get_l32_config():
-    """Returns the ViT-L/32 configuration."""
     config = get_l16_config()
     config.patches.size = (32, 32)
     return config
 
 
 def get_h14_config():
-    """Returns the ViT-L/16 configuration."""
     config = ml_collections.ConfigDict()
     config.patches = ml_collections.ConfigDict({'size': (14, 14)})
     config.hidden_size = 1280

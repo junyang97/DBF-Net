@@ -1,4 +1,3 @@
-# coding=utf-8
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -34,8 +33,6 @@ try:
     from mamba_ssm.ops.selective_scan_interface import selective_scan_fn, selective_scan_ref
 except:
     pass
-
-# an alternative for mamba_ssm (in which causal_conv1d is needed)
 try:
     from selective_scan import selective_scan_fn as selective_scan_fn_v1
     from selective_scan import selective_scan_ref as selective_scan_ref_v1
@@ -144,8 +141,6 @@ class Mlp(nn.Module):
 
 
 class Embeddings(nn.Module):
-    """Construct the embeddings from patch, position embeddings.
-    """
     def __init__(self, config, img_size, in_channels=3):
         super(Embeddings, self).__init__()
         self.hybrid = None
@@ -180,9 +175,9 @@ class Embeddings(nn.Module):
             x, features = self.hybrid_model(x)
         else:
             features = None
-        x = self.patch_embeddings(x)  # (B, hidden. n_patches^(1/2), n_patches^(1/2))
+        x = self.patch_embeddings(x)
         x = x.flatten(2)
-        x = x.transpose(-1, -2)  # (B, n_patches, hidden)
+        x = x.transpose(-1, -2)
 
         embeddings = x + self.position_embeddings
         embeddings = self.dropout(embeddings)
@@ -276,7 +271,7 @@ class Transformer(nn.Module):
 
     def forward(self, input_ids):
         embedding_output, features = self.embeddings(input_ids)
-        encoded, attn_weights = self.encoder(embedding_output)  # (B, n_patch, hidden)
+        encoded, attn_weights = self.encoder(embedding_output)
         return encoded, attn_weights, features
 
 
@@ -310,7 +305,6 @@ class SS2D(nn.Module):
             self,
             d_model,
             d_state=16,
-            # d_state="auto", # 20240109
             d_conv=3,
             expand=2,
             dt_rank="auto",
@@ -330,7 +324,6 @@ class SS2D(nn.Module):
         super().__init__()
         self.d_model = d_model
         self.d_state = d_state
-        # self.d_state = math.ceil(self.d_model / 6) if d_state == "auto" else d_model # 20240109
         self.d_conv = d_conv
         self.expand = expand
         self.d_inner = int(self.expand * self.d_model)
@@ -367,14 +360,13 @@ class SS2D(nn.Module):
             self.dt_init(self.dt_rank, self.d_inner, dt_scale, dt_init, dt_min, dt_max, dt_init_floor,
                          **factory_kwargs),
         )
-        self.dt_projs_weight = nn.Parameter(torch.stack([t.weight for t in self.dt_projs], dim=0))  # (K=4, inner, rank)
-        self.dt_projs_bias = nn.Parameter(torch.stack([t.bias for t in self.dt_projs], dim=0))  # (K=4, inner)
+        self.dt_projs_weight = nn.Parameter(torch.stack([t.weight for t in self.dt_projs], dim=0))
+        self.dt_projs_bias = nn.Parameter(torch.stack([t.bias for t in self.dt_projs], dim=0))
         del self.dt_projs
 
-        self.A_logs = self.A_log_init(self.d_state, self.d_inner, copies=4, merge=True)  # (K=4, D, N)
-        self.Ds = self.D_init(self.d_inner, copies=4, merge=True)  # (K=4, D, N)
+        self.A_logs = self.A_log_init(self.d_state, self.d_inner, copies=4, merge=True)
+        self.Ds = self.D_init(self.d_inner, copies=4, merge=True)
 
-        # self.selective_scan = selective_scan_fn
         self.forward_core = self.forward_corev0
 
         self.out_norm = nn.LayerNorm(self.d_inner)
@@ -386,7 +378,6 @@ class SS2D(nn.Module):
                 **factory_kwargs):
         dt_proj = nn.Linear(dt_rank, d_inner, bias=True, **factory_kwargs)
 
-        # Initialize special dt projection to preserve variance at initialization
         dt_init_std = dt_rank ** -0.5 * dt_scale
         if dt_init == "constant":
             nn.init.constant_(dt_proj.weight, dt_init_std)
@@ -395,29 +386,28 @@ class SS2D(nn.Module):
         else:
             raise NotImplementedError
 
-        # Initialize dt bias so that F.softplus(dt_bias) is between dt_min and dt_max
         dt = torch.exp(
             torch.rand(d_inner, **factory_kwargs) * (math.log(dt_max) - math.log(dt_min))
             + math.log(dt_min)
         ).clamp(min=dt_init_floor)
-        # Inverse of softplus: https://github.com/pytorch/pytorch/issues/72759
+
         inv_dt = dt + torch.log(-torch.expm1(-dt))
         with torch.no_grad():
             dt_proj.bias.copy_(inv_dt)
-        # Our initialization would set all Linear.bias to zero, need to mark this one as _no_reinit
+
         dt_proj.bias._no_reinit = True
 
         return dt_proj
 
     @staticmethod
     def A_log_init(d_state, d_inner, copies=1, device=None, merge=True):
-        # S4D real initialization
+
         A = repeat(
             torch.arange(1, d_state + 1, dtype=torch.float32, device=device),
             "n -> d n",
             d=d_inner,
         ).contiguous()
-        A_log = torch.log(A)  # Keep A_log in fp32
+        A_log = torch.log(A)
         if copies > 1:
             A_log = repeat(A_log, "d n -> r d n", r=copies)
             if merge:
@@ -428,13 +418,13 @@ class SS2D(nn.Module):
 
     @staticmethod
     def D_init(d_inner, copies=1, device=None, merge=True):
-        # D "skip" parameter
+
         D = torch.ones(d_inner, device=device)
         if copies > 1:
             D = repeat(D, "n1 -> r n1", r=copies)
             if merge:
                 D = D.flatten(0, 1)
-        D = nn.Parameter(D)  # Keep in fp32
+        D = nn.Parameter(D)
         D._no_weight_decay = True
         return D
 
@@ -447,21 +437,21 @@ class SS2D(nn.Module):
 
         x_hwwh = torch.stack([x.view(B, -1, L), torch.transpose(x, dim0=2, dim1=3).contiguous().view(B, -1, L)],
                              dim=1).view(B, 2, -1, L)
-        xs = torch.cat([x_hwwh, torch.flip(x_hwwh, dims=[-1])], dim=1)  # (b, k, d, l)
+        xs = torch.cat([x_hwwh, torch.flip(x_hwwh, dims=[-1])], dim=1)
 
         x_dbl = torch.einsum("b k d l, k c d -> b k c l", xs.view(B, K, -1, L), self.x_proj_weight)
-        # x_dbl = x_dbl + self.x_proj_bias.view(1, K, -1, 1)
+
         dts, Bs, Cs = torch.split(x_dbl, [self.dt_rank, self.d_state, self.d_state], dim=2)
         dts = torch.einsum("b k r l, k d r -> b k d l", dts.view(B, K, -1, L), self.dt_projs_weight)
-        # dts = dts + self.dt_projs_bias.view(1, K, -1, 1)
 
-        xs = xs.float().view(B, -1, L)  # (b, k * d, l)
-        dts = dts.contiguous().float().view(B, -1, L)  # (b, k * d, l)
-        Bs = Bs.float().view(B, K, -1, L)  # (b, k, d_state, l)
-        Cs = Cs.float().view(B, K, -1, L)  # (b, k, d_state, l)
-        Ds = self.Ds.float().view(-1)  # (k * d)
-        As = -torch.exp(self.A_logs.float()).view(-1, self.d_state)  # (k * d, d_state)
-        dt_projs_bias = self.dt_projs_bias.float().view(-1)  # (k * d)
+
+        xs = xs.float().view(B, -1, L)
+        dts = dts.contiguous().float().view(B, -1, L)
+        Bs = Bs.float().view(B, K, -1, L)
+        Cs = Cs.float().view(B, K, -1, L)
+        Ds = self.Ds.float().view(-1)
+        As = -torch.exp(self.A_logs.float()).view(-1, self.d_state)
+        dt_projs_bias = self.dt_projs_bias.float().view(-1)
 
         out_y = self.selective_scan(
             xs, dts,
@@ -478,7 +468,7 @@ class SS2D(nn.Module):
 
         return out_y[:, 0], inv_y[:, 0], wh_y, invwh_y
 
-    # an alternative to forward_corev1
+
     def forward_corev1(self, x: torch.Tensor):
         self.selective_scan = selective_scan_fn_v1
 
@@ -488,21 +478,20 @@ class SS2D(nn.Module):
 
         x_hwwh = torch.stack([x.view(B, -1, L), torch.transpose(x, dim0=2, dim1=3).contiguous().view(B, -1, L)],
                              dim=1).view(B, 2, -1, L)
-        xs = torch.cat([x_hwwh, torch.flip(x_hwwh, dims=[-1])], dim=1)  # (b, k, d, l)
-
+        xs = torch.cat([x_hwwh, torch.flip(x_hwwh, dims=[-1])], dim=1)
         x_dbl = torch.einsum("b k d l, k c d -> b k c l", xs.view(B, K, -1, L), self.x_proj_weight)
-        # x_dbl = x_dbl + self.x_proj_bias.view(1, K, -1, 1)
+
         dts, Bs, Cs = torch.split(x_dbl, [self.dt_rank, self.d_state, self.d_state], dim=2)
         dts = torch.einsum("b k r l, k d r -> b k d l", dts.view(B, K, -1, L), self.dt_projs_weight)
-        # dts = dts + self.dt_projs_bias.view(1, K, -1, 1)
 
-        xs = xs.float().view(B, -1, L)  # (b, k * d, l)
-        dts = dts.contiguous().float().view(B, -1, L)  # (b, k * d, l)
-        Bs = Bs.float().view(B, K, -1, L)  # (b, k, d_state, l)
-        Cs = Cs.float().view(B, K, -1, L)  # (b, k, d_state, l)
-        Ds = self.Ds.float().view(-1)  # (k * d)
-        As = -torch.exp(self.A_logs.float()).view(-1, self.d_state)  # (k * d, d_state)
-        dt_projs_bias = self.dt_projs_bias.float().view(-1)  # (k * d)
+
+        xs = xs.float().view(B, -1, L)
+        dts = dts.contiguous().float().view(B, -1, L)
+        Bs = Bs.float().view(B, K, -1, L)
+        Cs = Cs.float().view(B, K, -1, L)
+        Ds = self.Ds.float().view(-1)
+        As = -torch.exp(self.A_logs.float()).view(-1, self.d_state)
+        dt_projs_bias = self.dt_projs_bias.float().view(-1)
 
         out_y = self.selective_scan(
             xs, dts,
@@ -522,10 +511,10 @@ class SS2D(nn.Module):
         B, H, W, C = x.shape
 
         xz = self.in_proj(x)
-        x, z = xz.chunk(2, dim=-1)  # (b, h, w, d)
+        x, z = xz.chunk(2, dim=-1)
 
         x = x.permute(0, 3, 1, 2).contiguous()
-        x = self.act(self.conv2d(x))  # (b, d, h, w)
+        x = self.act(self.conv2d(x))
         y1, y2, y3, y4 = self.forward_core(x)
         assert y1.dtype == torch.float32
         y = y1 + y2 + y3 + y4
@@ -564,15 +553,13 @@ class DecoderBlock(nn.Module):
             out_channels,
             skip_channels=0,
             use_batchnorm=True,
-            use_checkpoint=False,  # <-- 添加这个参数，并设置默认值为 False
-            use_mamba = False,  # 控制是否使用 Mamba
+            use_checkpoint=False,
+            use_mamba = False,
     ):
         super().__init__()
         self.use_checkpoint = use_checkpoint
         self.use_mamba = use_mamba
-        #1.上采样层
         self.up = nn.UpsamplingBilinear2d(scale_factor=2)
-        #2. 第一个卷积层，负责处理融合后的特征
         self.conv1 = Conv2dReLU(
             in_channels + skip_channels,
             out_channels,
@@ -587,12 +574,7 @@ class DecoderBlock(nn.Module):
             padding=1,
             use_batchnorm=use_batchnorm,
         )
-        # # --- 3. 核心改造：用 VSSBlock (Mamba) 替换第二个卷积层,可选 ---
-        # self.mamba_enhancer = VSSBlock(
-        #     hidden_dim=out_channels,  # Mamba 块处理的维度是这一层的输出通道数
-        #     drop_path=0.1,  # 设置 DropPath 概率
-        #     d_state=16,  # Mamba 的状态维度
-        # )
+
         if out_channels <= 128:
             self.mamba_enhancer = VSSBlock(
                 hidden_dim=out_channels,
@@ -603,30 +585,17 @@ class DecoderBlock(nn.Module):
             self.mamba_enhancer = nn.Identity()
 
     def forward(self, x, skip=None):
-        #1.上采样
         x = self.up(x)
-        #2.特征跳跃融合
         if skip is not None:
             x = torch.cat([x, skip], dim=1)
-        # 3. 经过第一个卷积块进行局部特征处理和降维
         x = self.conv1(x)
-        #x = self.conv2(x)
+
         if self.use_mamba:
-            #4. 经过 Mamba 块进行全局上下文增强 ---
-            # a. 转换维度以适应 VSSBlock: (B, C, H, W) -> (B, H, W, C)
             x_permuted = x.permute(0, 2, 3, 1).contiguous()
-            # b. Mamba 块处理
-            #mamba_out = self.mamba_enhancer(x_permuted)  # 输出形状: (B, H, W, C)
-            # ✨✨✨ 新的、节省显存的代码:
-            # 使用 checkpoint.checkpoint 来包裹 mamba_enhancer 的调用
-            # 注意：这只会在 model.train() 模式下生效
-            #mamba_out = checkpoint.checkpoint(self.mamba_enhancer, x_permuted)
-            # --- ❗️只在需要时才使用 checkpoint❗️ ---
             if self.use_checkpoint and self.training:
                 mamba_out = checkpoint.checkpoint(self.mamba_enhancer, x_permuted, use_reentrant=False)
             else:
                 mamba_out = self.mamba_enhancer(x_permuted)
-            #c. 转换回 PyTorch 的标准图像维度: (B, H, W, C) -> (B, C, H, W)
             x = mamba_out.permute(0, 3, 1, 2).contiguous()
         else:
             x = self.conv2(x)
@@ -659,67 +628,31 @@ class DecoderCup(nn.Module):
 
         if self.config.n_skip != 0:
             skip_channels = self.config.skip_channels
-            for i in range(4-self.config.n_skip):  # re-select the skip channels according to n_skip
+            for i in range(4-self.config.n_skip):
                 skip_channels[3-i]=0
 
         else:
             skip_channels=[0,0,0,0]
 
-        # blocks = [
-        #     DecoderBlock(in_ch, out_ch, sk_ch) for in_ch, out_ch, sk_ch in zip(in_channels, out_channels, skip_channels)
-        # ]
-            # --- ❗️❗️❗️ 用下面这段完整的 for 循环，替换掉原来的 blocks = [...] ❗️❗️❗️ ---
-
-        # 1. 先创建一个空的列表
         blocks = []
-
-        # 2. 获取解码器的总层数
-        num_decoder_layers = len(decoder_channels)  # 通常是 4
-        #11.3增加mamba_layers[]
-        # 策略A：渐进式Mamba (推荐)
-        mamba_layers = [0,1,2]  # 深、中、浅层都用Mamba x 先测试不用mamba,只在 Decoder 第 0 层使用 Mamba
-
-        # 3. 使用带索引的 for 循环来创建 block
+        num_decoder_layers = len(decoder_channels)
+        mamba_layers = [0,1,2]
         for i, (in_ch, out_ch, sk_ch) in enumerate(zip(in_channels, out_channels, skip_channels)):
-            # --- 4. 在这里设置条件，决定是否开启 checkpoint ---
-            # i 从 0 (最深层) 到 3 (最浅层)
-            # 我们只为最浅的两层 (i=2 和 i=3) 开启 checkpoint
-            # 因为它们处理的特征图尺寸最大，最消耗显存
-            #should_use_checkpoint = True if i >= 2 else False
-            #should_use_checkpoint = True
-            # --- ❗️ 策略 A: 只为最浅的一层开启 ---
-            #should_use_checkpoint = True if i == 3 else False
-
-            # --- ❗️ 策略 B (如果 A 导致 OOM): 为最浅的两层开启 ---
-            # should_use_checkpoint = True if i >= 2 else False
-            # should_use_checkpoint = False
-            #
-            # print(f"Creating DecoderBlock {i}: use_checkpoint = {should_use_checkpoint}")
-
-            # # 策略：只在最深层 (i=0) 使用Mamba，并且为它启用checkpoint
-            # use_mamba_in_this_block = (i == 0)
-            # use_checkpoint_in_this_block = (i == 0)  # 同样只在Mamba层启用
-            #更改mamba使用层数和使用checkpoint的层
             use_mamba = (i in mamba_layers)
-            # 浅层特征图大，更需要checkpoint
             use_checkpoint = (i >= 1) if use_mamba else False
-            # 5. 创建 DecoderBlock 实例，并传入 use_checkpoint 参数
             block = DecoderBlock(
                 in_ch,
                 out_ch,
                 sk_ch,
-                #use_checkpoint=should_use_checkpoint  # <-- 将开关传递进去
-                # use_mamba=use_mamba_in_this_block,
-                # use_checkpoint=use_checkpoint_in_this_block
                 use_mamba=use_mamba,
                 use_checkpoint=use_checkpoint
             )
-            # 6. 将创建好的 block 添加到列表中
+
             blocks.append(block)
         self.blocks = nn.ModuleList(blocks)
 
     def forward(self, hidden_states, features=None):
-        B, n_patch, hidden = hidden_states.size()  # reshape from (B, n_patch, hidden) to (B, h, w, hidden)
+        B, n_patch, hidden = hidden_states.size()
         h, w = int(np.sqrt(n_patch)), int(np.sqrt(n_patch))
         x = hidden_states.permute(0, 2, 1)
         x = x.contiguous().view(B, hidden, h, w)
@@ -751,7 +684,7 @@ class VisionTransformer(nn.Module):
     def forward(self, x):
         if x.size()[1] == 1:
             x = x.repeat(1,3,1,1)
-        x, attn_weights, features = self.transformer(x)  # (B, n_patch, hidden)
+        x, attn_weights, features = self.transformer(x)
         x = self.decoder(x, features)
         logits = self.segmentation_head(x)
         return logits

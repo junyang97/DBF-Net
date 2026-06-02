@@ -7,9 +7,8 @@ from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 
 from datasets.dataset_isic_all_loss import NPY_datasets, Polyp_datasets
-from fusion.models.fusion_model_3drop import build_fusion_model
+from fusion.models.fusion_model import build_fusion_model
 from engine_isic_allegnoloss import *
-#from fusion.utils_polyp_loss import *
 from fusion.utils_polyp_loss_5 import *
 from fusion.utils_polyp_losscompare import cal_params,cal_flops,benchmark_inference
 from fusion.configs.config_setting_polyp import setting_config
@@ -43,7 +42,6 @@ def main(config):
 
     print('#----------Preparing dataset----------#')
     train_dataset = Polyp_datasets(config.data_path, config, train=True)
-    #train_dataset = NPY_datasets(config.data_path, config, train=True)
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.batch_size,
@@ -65,29 +63,13 @@ def main(config):
             drop_last=True
         )
         val_loader_dict[dataset] = val_loader
-    # val_dataset = NPY_datasets(config.data_path, config, train=False)
-    # val_loader = DataLoader(
-    #     val_dataset,
-    #     batch_size=1,
-    #     shuffle=False,
-    #     pin_memory=True,
-    #     num_workers=config.num_workers,
-    #     drop_last=True
-    # )
-
     print('#----------Prepareing Model----------#')
     model_cfg = config.model_config
-    if config.network == 'fusion_egalayerall':#dropega_adaptive
-        # model = build_fusion_model(
-        #     load_pretrained=True,
-        #     npz_path=config.transunet_pretrained_path,
-        #     ega_input_mode="adaptive"
-        # )
+    if config.network == 'fusion_egalayerall':
         model = build_fusion_model(
                 load_pretrained=True,
                 npz_path=config.transunet_pretrained_path,
                 ega_input_mode="adaptive",
-                # branch_mode="mamba"
                 use_cross_guided_fusion=True,
                 use_two_stage_decoder=True,
                 use_ega_refine=True
@@ -97,17 +79,14 @@ def main(config):
         raise Exception('network in not right!')
 
     model = model.to(device)
-    ###############################
     param_info = cal_params(model, logger)
-    # flops_info = cal_flops(model, input_size=(1, 3, 256, 256), logger=logger)
     from calflops import calculate_flops
-    input_shape = (1, 3, 256, 256)  # 请根据你的实际图像分辨率修改，比如 (1,3,256,256)
-
+    input_shape = (1, 3, 256, 256)
     flops, macs, params = calculate_flops(
         model=model,
         input_shape=input_shape,
-        print_results=True,  # 是否打印详细的层级表格
-        print_detailed=False  # 设置为 False 防止打印内容过长
+        print_results=True,
+        print_detailed=False
     )
 
     print(f"Total FLOPs: {flops}")
@@ -125,8 +104,6 @@ def main(config):
     print("\n#----------Model Complexity Report----------#")
     print(f"Total Params (M): {param_info['total_params_m']:.4f}")
     print(f"Trainable Params (M): {param_info['trainable_params_m']:.4f}")
-    # print(f"MACs (G): {flops_info['macs_g']:.4f}")
-    # print(f"FLOPs (G): {flops_info['flops_est_g']:.4f}")
     print(f"GPU Memory Usage (MB): {bench_info['peak_memory_mb']:.2f}")
     print(f"Latency (ms/img): {bench_info['latency_ms']:.4f}")
     print(f"FPS: {bench_info['fps']:.2f}")
@@ -134,13 +111,10 @@ def main(config):
     logger.info("#----------Model Complexity Report----------#")
     logger.info(f"Total Params (M): {param_info['total_params_m']:.4f}")
     logger.info(f"Trainable Params (M): {param_info['trainable_params_m']:.4f}")
-    # logger.info(f"MACs (G): {flops_info['macs_g']:.4f}")
-    # logger.info(f"FLOPs (G): {flops_info['flops_est_g']:.4f}")
     logger.info(f"GPU Memory Usage (MB): {bench_info['peak_memory_mb']:.2f}")
     logger.info(f"Latency (ms/img): {bench_info['latency_ms']:.4f}")
     logger.info(f"FPS: {bench_info['fps']:.2f}")
 
-    ###############################
     print('#----------Prepareing loss, opt, sch and amp----------#')
     criterion = config.criterion
     optimizer = get_optimizer(config, model)
@@ -230,21 +204,11 @@ def main(config):
                 config,
                 val_data_name=name
             )
-        # val_metrics = val_one_epoch(
-        #     val_loader,
-        #     model,
-        #     criterion,
-        #     epoch,
-        #     logger,
-        #     config,
-        # )
 
             loss_all.append(val_metrics['loss'])
             miou_all.append(val_metrics['miou'])
             dice_all.append(val_metrics['f1_or_dsc'])
-        # loss_all.append(val_metrics['loss'])
-        # miou_all.append(val_metrics['miou'])
-        # dice_all.append(val_metrics['f1_or_dsc'])
+
         loss = float(np.mean(loss_all))
         miou = float(np.mean(miou_all))
         dice = float(np.mean(dice_all))
@@ -329,13 +293,6 @@ def main(config):
                 config,
                 test_data_name=f'{name} [{metric_name}]'
             )
-        # _ = test_one_epoch(
-        #     val_loader,
-        #     model,
-        #     criterion,
-        #     logger,
-        #     config,
-        # )
 
         new_name = f'{metric_name}-epoch{metric_epoch}-{metric_name}{metric_value:.4f}.pth'
         new_path = os.path.join(checkpoint_dir, new_name)
