@@ -23,5 +23,5 @@ We develop our codes in the following environment:
 ## 4. How to run the codes
 
 ```python
-python -m fusion.train.py
+python -m fusion.train
 ```
