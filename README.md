@@ -8,7 +8,7 @@ This is the PyTorch implementation for **DBF-Net** proposed in the paper **A Dua
 
 
 
-![Algorithm.jpg](Algorithm.jpg)
+![overview.png](overview.png)
 
 
 ## 2. Running environment
